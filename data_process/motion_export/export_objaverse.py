@@ -188,7 +188,8 @@ def main():
                 log_file.write(f"Failed to export {glb_path}: {e}\n")
 
     worker_suffix = f"_worker{args.worker_id}" if args.num_workers > 1 else ""
-    write_export_summary(args.output_dir, all_joint_names, worker_suffix=worker_suffix)
+    write_export_summary(args.output_dir, all_joint_names, fps=args.fps,
+                         worker_suffix=worker_suffix)
 
     if n_failed:
         logger.error(f"{n_failed}/{len(gltf_paths)} assets failed; see {error_log}")

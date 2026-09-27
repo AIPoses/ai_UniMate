@@ -15,6 +15,7 @@ Usage (plain python — EEVEE needs the pip ``bpy`` module's GPU context):
 """
 
 import os
+import sys
 import argparse
 from pathlib import Path
 
@@ -154,14 +155,27 @@ def main():
     error_log = os.path.join(args.output_dir,
                              f'tpose_errors_worker{args.worker_id}.log')
 
+    n_failed = 0
     for name, path in assets:
         try:
             render_asset_tpose(name, path, args.output_dir, args)
-        except Exception as e:
-            logger.error(f"Failed to render {path}: {e}")
+        except Exception as e:  # noqa: BLE001 — keep the batch going
+            n_failed += 1
+            logger.exception(f"Failed to render {path}")
             with open(error_log, 'a') as f:
                 f.write(f"{path}\t{e}\n")
 
+    if n_failed:
+        logger.error(f"{n_failed}/{len(assets)} assets failed; see {error_log}")
+    return 1 if n_failed else 0
+
 
 if __name__ == "__main__":
-    main()
+    # bpy/Blender exits 0 even on an uncaught exception, which hides failures
+    # from `set -e` and from Slurm's afterok dependencies (same guard as the
+    # motion renderers).
+    try:
+        sys.exit(main())
+    except Exception:
+        logger.exception("render_tpose failed")
+        sys.exit(1)

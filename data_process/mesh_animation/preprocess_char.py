@@ -274,9 +274,15 @@ def bake_canonical_asset(char_path, cond, out_base, formats=('glb',)):
 
 def preprocess_asset(char_path, output_dir, face_r=None, face_l=None,
                      body_axis=False, target_diameter=2.0, formats=('glb',),
-                     save_vis=False, apply_clip=False, max_clip_len=10 ** 8,
-                     keep_intermediate=False):
-    """Export + extract + bake one asset; see the module docstring."""
+                     save_vis=False, apply_clip=False, max_clip_len=200,
+                     clip_stride=110, keep_intermediate=False):
+    """Export + extract + bake one asset; see the module docstring.
+
+    ``max_clip_len`` / ``clip_stride`` mirror stage 4's ``--max_clip_len`` and
+    ``max_clip_len - diffusion_max_len``: without ``apply_clip`` a motion is
+    truncated to ``max_clip_len`` frames, with it the motion is cropped into
+    overlapping windows of that length.
+    """
     assert os.path.exists(char_path), f"Asset not found: {char_path}"
     name = os.path.splitext(os.path.basename(char_path))[0]
     os.makedirs(output_dir, exist_ok=True)
@@ -305,6 +311,7 @@ def preprocess_asset(char_path, output_dir, face_r=None, face_l=None,
             face_joints=face_joints, clean_names=clean_names,
             expected_names=raw_names,
             apply_clip=apply_clip, max_clip_len=max_clip_len,
+            clip_stride=clip_stride,
             target_diameter=target_diameter, save_vis=save_vis)
         assert cond is not None, ("feature extraction skipped this asset "
                                   "(degenerate skeleton or no usable clips — see log)")
@@ -363,8 +370,17 @@ def parse_args():
     parser.add_argument("--save_vis", action='store_true',
                         help="Also render per-clip preview MP4s (slow).")
     parser.add_argument("--apply_clip", action='store_true',
-                        help="Crop motions into overlapping training-length clips "
-                             "instead of one full-length feature NPZ per motion.")
+                        help="Crop motions into overlapping windows of "
+                             "--max_clip_len frames (stride max_clip_len - "
+                             "diffusion_max_len) instead of truncating each "
+                             "motion to --max_clip_len frames.")
+    parser.add_argument("--max_clip_len", type=int, default=200,
+                        help="Frames kept per motion / window length "
+                             "(stage-4 default: 200).")
+    parser.add_argument("--diffusion_max_len", type=int, default=90,
+                        help="Training crop length used to derive the window "
+                             "stride max_clip_len - diffusion_max_len "
+                             "(stage-4 default: 90).")
     parser.add_argument("--keep_intermediate", action='store_true',
                         help="Keep export/ NPZs and T-pose/preview visuals (default: "
                              "only canonical asset + cond.npy + motions/ remain).")
@@ -373,6 +389,10 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
+    if args.apply_clip and args.max_clip_len <= args.diffusion_max_len:
+        raise SystemExit(
+            f"--apply_clip needs max_clip_len ({args.max_clip_len}) > "
+            f"diffusion_max_len ({args.diffusion_max_len}) for a positive stride")
     preprocess_asset(
         char_path=args.char_path,
         output_dir=args.output_dir,
@@ -383,5 +403,7 @@ if __name__ == "__main__":
         formats=tuple(f.strip().lower() for f in args.formats.split(',') if f.strip()),
         save_vis=args.save_vis,
         apply_clip=args.apply_clip,
+        max_clip_len=args.max_clip_len,
+        clip_stride=args.max_clip_len - args.diffusion_max_len,
         keep_intermediate=args.keep_intermediate,
     )

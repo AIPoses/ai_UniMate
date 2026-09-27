@@ -217,7 +217,8 @@ def main(args):
             ref_bone_names = json.load(f).get("mixamo")
 
     all_joint_names = {"mixamo": ref_bone_names} if ref_bone_names else {}
-    write_export_summary(args.output_dir, all_joint_names, worker_suffix=worker_suffix)
+    write_export_summary(args.output_dir, all_joint_names, fps=args.fps,
+                         worker_suffix=worker_suffix)
 
     if n_failed:
         logger.error(f"{n_failed}/{len(anim_paths)} clips failed; see {error_log}")

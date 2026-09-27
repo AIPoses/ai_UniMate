@@ -178,7 +178,14 @@ def load_motion_local_mats(anim_path, dataset_type=None, cond_path=None):
             build_anim_from_npz,
             load_cond_data,
         )
-        assert dataset_type, "--dataset_type is required for feature-format motion"
+        # Either flag resolves the cond: --dataset_type picks the dataset's
+        # default cond.npy (and the 'mixamo' key), --cond_path names the file
+        # directly (object type from the clip's filename prefix, or the file's
+        # single entry — a preprocess_char cond has exactly one).
+        if not dataset_type and not cond_path:
+            raise RuntimeError(
+                "feature-format motion needs --dataset_type and/or --cond_path "
+                "(omit both only for a canonical asset from preprocess_char)")
         cond_path = cond_path or COND_PATH_TEMPLATE.format(dataset_type=dataset_type)
         cond_data = load_cond_data(cond_path, anim_path, dataset_type)
         anim, rest_anim, _tpos, raw = build_anim_from_npz(anim_path, cond_data)

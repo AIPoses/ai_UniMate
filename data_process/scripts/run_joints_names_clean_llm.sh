@@ -6,8 +6,10 @@
 #   MODEL=deepseek-v4-flash bash data_process/scripts/run_joints_names_clean_llm.sh objaverse # DeepSeek API
 #   MODEL=Qwen/Qwen3-8B bash data_process/scripts/run_joints_names_clean_llm.sh objaverse # local HF model
 #
-# Env overrides: INPUT, OUTPUT, MODEL, MAX_TOKENS. Extra args are passed through
-# (e.g. --no_fallback). API backends read OPENAI_API_KEY / DEEPSEEK_API_KEY.
+# Env overrides: INPUT, OUTPUT, MODEL, MAX_TOKENS, RIG_TIMEOUT (per-rig budget
+# in seconds; default 300 for deepseek*, else 60). Extra args are passed
+# through (e.g. --no_fallback, --overwrite, --redo_failed). API backends read
+# OPENAI_API_KEY / DEEPSEEK_API_KEY.
 
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
@@ -22,8 +24,11 @@ INPUT=${INPUT:-$(export_dir "$DATASET")/joint_names.json}
 OUTPUT=${OUTPUT:-$(export_dir "$DATASET")/clean_joint_names.json}
 MODEL=${MODEL:-deepseek-v4-flash}
 MAX_TOKENS=${MAX_TOKENS:-2048}
+# One batched call per rig; thinking backends need a much larger budget (same
+# split as the other stage-3 wrappers).
+if [[ "$MODEL" == deepseek* ]]; then RIG_TIMEOUT=${RIG_TIMEOUT:-300}; else RIG_TIMEOUT=${RIG_TIMEOUT:-60}; fi
 
 python -m data_process.joint_annotation.names_clean_llm \
     --input="$INPUT" --output="$OUTPUT" \
-    --model="$MODEL" --max_tokens="$MAX_TOKENS" \
+    --model="$MODEL" --max_tokens="$MAX_TOKENS" --rig_timeout="$RIG_TIMEOUT" \
     --report "$@"

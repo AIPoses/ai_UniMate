@@ -253,7 +253,7 @@ def main():
             with open(error_log, 'a') as log_file:
                 log_file.write(f"Failed to export species {species}: {e}\n")
 
-    write_export_summary(args.output_dir, all_joint_names)
+    write_export_summary(args.output_dir, all_joint_names, fps=args.fps)
     if n_failed:
         logger.error(f"{n_failed}/{len(by_species)} species failed; see {error_log}")
         sys.exit(1)

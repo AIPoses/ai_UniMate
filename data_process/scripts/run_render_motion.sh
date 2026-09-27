@@ -42,6 +42,14 @@ EXTRA_ARGS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --multi-worker) NUM_WORKERS="${2:?--multi-worker requires a value}"; shift 2 ;;
+        --missing-only)
+            # Only render_objaverse.py implements the flag; the other two
+            # renderers would reject it from argparse after loading bpy.
+            if [[ "$DATASET" != "objaverse" ]]; then
+                echo "ERROR: --missing-only is only supported for objaverse (the other renderers resume per asset anyway)" >&2
+                exit 2
+            fi
+            EXTRA_ARGS+=("$1"); shift ;;
         *) EXTRA_ARGS+=("$1"); shift ;;
     esac
 done

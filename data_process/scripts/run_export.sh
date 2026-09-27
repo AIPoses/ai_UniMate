@@ -30,6 +30,13 @@ handle_help "$@"
 MODE=auto
 case "${1:-}" in
     truebones|mixamo|objaverse|auto) MODE="$1"; shift ;;
+    ""|--*) ;;   # no dataset given: auto mode (DATA_DIR required), flags follow
+    *)
+        # A bare word that is not a dataset name is almost always a typo;
+        # silently treating it as an exporter flag would land in auto mode
+        # and fail later on a missing DATA_DIR.
+        echo "ERROR: unknown dataset '$1' (expected truebones | mixamo | objaverse | auto)" >&2
+        exit 2 ;;
 esac
 
 NUM_WORKERS=1

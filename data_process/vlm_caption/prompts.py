@@ -18,6 +18,12 @@ vocabulary, and style examples.
 # Shared caption-prompt scaffold
 # ═════════════════════════════════════════════════════════════════════════════
 
+# The subject every caption opens with, in every dataset. The three
+# datasets train as one mixture, so a per-dataset subject would hand the
+# text encoder a free dataset label and defeat the topology-agnostic
+# conditioning. Keep in sync with patch_annotations.py's SUBJECT.
+CORPUS_SUBJECT = 'An object'
+
 _INPUT_CAMERAS = (
     "# Input\n"
     "Four synchronized cameras 90 degrees apart at fixed elevation, labeled "
@@ -151,7 +157,7 @@ MIXAMO_PROMPT = _caption_prompt(
     articulation="limbs move, pelvis fixed",
     in_place_example="'runs in place', 'marches in place'",
     vocab_block="",
-    subject="A person",
+    subject=CORPUS_SUBJECT,
     uncertain_fallback=(
         "If heading is uncertain, say 'one arm' / 'one leg' instead of "
         "guessing left/right."
@@ -164,12 +170,12 @@ MIXAMO_PROMPT = _caption_prompt(
     no_appearance_extra=", no clothing",
     still_clause="subtle sway/breathing still counts as motion",
     examples=(
-        "- A person walks forward.\n"
-        "- A person runs in place.\n"
-        "- A person punches with the right fist.\n"
-        "- A person raises one arm while seated.\n"
-        "- A person turns around as if carrying something.\n"
-        "- A person crouches and then rises back up.\n"
+        "- An object walks forward.\n"
+        "- An object runs in place.\n"
+        "- An object punches with the right fist.\n"
+        "- An object raises one arm while seated.\n"
+        "- An object turns around as if carrying something.\n"
+        "- An object crouches and then rises back up.\n"
     ),
 )
 
@@ -259,7 +265,7 @@ TRUEBONES_PROMPT = _caption_prompt(
         "them. Do not copy the label "
         "verbatim: rewrite it in the required format and never carry a "
         "species word into the caption — the example label above becomes "
-        "'An animal runs forward and then falls to the right.'\n\n"
+        "'An object runs forward and then falls to the right.'\n\n"
     ),
     step1=(
         "1. ESTABLISH HEADING. Cues, in priority order: (a) "
@@ -272,7 +278,7 @@ TRUEBONES_PROMPT = _caption_prompt(
     articulation="limbs/wings/tail/jaw move, torso fixed",
     in_place_example="'trots in place'",
     vocab_block="",
-    subject="An animal",
+    subject=CORPUS_SUBJECT,
     uncertain_fallback=(
         "If heading is uncertain, say 'one foreleg' / 'a wing' instead of "
         "guessing left/right."
@@ -289,12 +295,12 @@ TRUEBONES_PROMPT = _caption_prompt(
     no_appearance_extra="/color/texture",
     still_clause="subtle sway, breathing, tail flicks, ear twitches still count as motion",
     examples=(
-        "- An animal gallops forward.\n"
-        "- An animal turns to the right.\n"
-        "- An animal rears upward on its hind legs.\n"
-        "- An animal flaps its wings and rises.\n"
-        "- An animal swims forward with its tail.\n"
-        "- An animal strikes forward with its tail curled.\n"
+        "- An object gallops forward.\n"
+        "- An object turns to the right.\n"
+        "- An object rears upward on its hind legs.\n"
+        "- An object flaps its wings and rises.\n"
+        "- An object swims forward with its tail.\n"
+        "- An object strikes forward with its tail curled.\n"
     ),
 )
 

@@ -91,7 +91,8 @@ def create_train_dataloader(
     """Build the training DataLoader over the train split of the Mixture dataset."""
     dataset = create_dataset(dataset_config, model_config)
 
-    sampler = MixtureSampler(dataset, alpha=dataset_config.sampler_alpha) if balanced else None
+    sampler = MixtureSampler(dataset, alpha=dataset_config.sampler_alpha,
+                             dataset_alpha=dataset_config.sampler_dataset_alpha) if balanced else None
 
     return DataLoader(
         dataset,

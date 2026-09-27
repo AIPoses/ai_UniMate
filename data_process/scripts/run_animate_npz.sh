@@ -10,6 +10,8 @@
 #   ANIM_PATH      (required — NPZ whose skeleton matches the rig)
 #   OUTPUT_DIR     (default: outputs/animated)
 #   CHAR_ANIM_TYPE glb|fbx (default: glb)
+#   EXTRA_BONES_STRATEGY merge|remove|keep for armature bones absent from the
+#                  NPZ (default: merge, see animate_npz.py)
 
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
@@ -21,8 +23,11 @@ ANIM_PATH=${ANIM_PATH:?Set ANIM_PATH to a motion NPZ matching the rig}
 OUTPUT_DIR=${OUTPUT_DIR:-outputs/animated}
 CHAR_ANIM_TYPE=${CHAR_ANIM_TYPE:-glb}
 
+EXTRA_ARGS=()
+[[ -n "${EXTRA_BONES_STRATEGY:-}" ]] && EXTRA_ARGS+=(--extra_bones_strategy="$EXTRA_BONES_STRATEGY")
+
 blender -b -P data_process/mesh_animation/animate_npz.py -- \
     --char_path="$CHAR_PATH" \
     --anim_path="$ANIM_PATH" \
     --output_dir="$OUTPUT_DIR" \
-    --char_anim_type="$CHAR_ANIM_TYPE" "$@"
+    --char_anim_type="$CHAR_ANIM_TYPE" "${EXTRA_ARGS[@]}" "$@"

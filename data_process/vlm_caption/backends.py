@@ -53,12 +53,14 @@ def detect_backend(model_name):
     """Auto-detect backend from model name.
 
     - Contains 'qwen' (case-insensitive) -> qwen
-    - Starts with 'gemini' -> gemini
+    - Contains 'gemini' (case-insensitive, so ``google/gemini-...`` and
+      ``Gemini-3-...`` route correctly) -> gemini
     - Everything else -> openai
     """
-    if "qwen" in model_name.lower():
+    lowered = model_name.lower()
+    if "qwen" in lowered:
         return BACKEND_QWEN
-    elif model_name.startswith("gemini"):
+    elif "gemini" in lowered:
         return BACKEND_GEMINI
     else:
         return BACKEND_OPENAI

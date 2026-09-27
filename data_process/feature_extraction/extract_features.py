@@ -12,7 +12,11 @@ Supports three dataset layouts via ``--dataset_type``:
   bare motion stems.
 
 An optional ``filtered_clips.txt`` listing individual clips to skip is read
-for every layout.
+for every layout, and an optional ``clip_trims.txt`` (``<clip stem> <N>``)
+drops the first N frames of a clip's export NPZ on load, and an optional
+``activity_keep.txt`` exempts listed clips from the low-activity filter. All
+three are generated from the hand-reviewed patches by
+``tools/patch_annotations.py``.
 
 Stage-2 (captions, category groups) and stage-3 (clean / face joint names)
 metadata JSONs are read from ``data_dir`` — see
@@ -41,6 +45,7 @@ import hashlib
 import json
 import multiprocessing as mp
 import os
+import zipfile
 from os.path import join as pjoin
 
 import numpy as np
@@ -148,13 +153,31 @@ def parse_args():
                              "with optional '#' comments. Default 'auto' uses "
                              "<data_dir>/filtered_clips.txt if present. Pass an "
                              "empty string to disable. Complements the on-the-fly "
-                             "quality filters; entries land in filtered_clips.json.")
+                             "quality filters. Listed clips are dropped before "
+                             "any object is processed, so they do NOT appear in "
+                             "filtered_clips.json (which records runtime filters).")
     parser.add_argument("--filtered_objects", type=str, default="auto",
                         help="(objaverse only) Path to a txt file listing object "
                              "types to skip (one per line; blanks and '#' comments "
                              "ignored). Default 'auto' uses "
                              "<data_dir>/filtered_objects.txt if present. Pass an "
                              "empty string to disable.")
+    parser.add_argument("--clip_trims", type=str, default="auto",
+                        help="Path to a txt file of hand-reviewed head trims, one "
+                             "'<clip stem> <N>' per line with optional '#' comments: "
+                             "the first N frames of that clip's export NPZ are "
+                             "dropped on load, before downsampling and the static "
+                             "trim (a bind-pose or foreign first frame that snaps "
+                             "into the motion). Default 'auto' uses "
+                             "<data_dir>/clip_trims.txt if present. Pass an empty "
+                             "string to disable.")
+    parser.add_argument("--activity_keep", type=str, default="auto",
+                        help="Path to a txt file of clip stems (one per line, '#' "
+                             "comments) exempt from the low-activity filter: "
+                             "hand-reviewed small but real motions such as a head "
+                             "turn or a wave. Default 'auto' uses "
+                             "<data_dir>/activity_keep.txt if present. Pass an empty "
+                             "string to disable.")
     parser.add_argument("--category_groups", type=str, default="auto",
                         help="Path to the body-plan category JSON copied into "
                              "the feature dir (the training loader reads it for "
@@ -208,6 +231,35 @@ def resolve_filtered_clips_path(path, data_dir):
     return _resolve_skip_list_path(path, data_dir, 'filtered_clips.txt')
 
 
+def resolve_clip_trims_path(path, data_dir):
+    return _resolve_skip_list_path(path, data_dir, 'clip_trims.txt')
+
+
+def resolve_activity_keep_path(path, data_dir):
+    return _resolve_skip_list_path(path, data_dir, 'activity_keep.txt')
+
+
+def load_clip_trims(path):
+    """Read ``<clip stem> <N>`` head trims; a falsy path yields an empty dict.
+
+    Malformed lines raise instead of being skipped: a trim that silently does
+    nothing would leave the snap it was written for in the training data.
+    """
+    trims = {}
+    if not path:
+        return trims
+    with open(path, 'r') as f:
+        for lineno, line in enumerate(f, 1):
+            body = line.split('#', 1)[0].split()
+            if not body:
+                continue
+            if len(body) != 2 or not body[1].isdigit() or int(body[1]) < 1:
+                raise ValueError(f'{path}:{lineno}: expected "<clip stem> <N>" with '
+                                 f'N >= 1, got {line.strip()!r}')
+            trims[body[0]] = int(body[1])
+    return trims
+
+
 def resolve_category_groups(path, metadata):
     """Return the category groups to copy into the feature dir, or None.
 
@@ -215,7 +267,9 @@ def resolve_category_groups(path, metadata):
     the data dir; an empty string drops it; any other value is loaded as an
     explicit path. Nothing in this stage consumes the groups — they are
     passed through to the feature dir — so dropping them only means the
-    copy is made later, by hand, once the classifier has finished.
+    copy is made later, by hand, once the classifier has finished. Like the
+    two skip lists, a missing explicit path is skipped with a warning rather
+    than aborting the run.
     """
     if not path:
         if metadata.pop('category_groups', None) is not None:
@@ -224,7 +278,10 @@ def resolve_category_groups(path, metadata):
     if path != 'auto':
         groups = load_json(path)
         if groups is None:
-            raise ValueError(f'--category_groups {path!r} not found')
+            logger.warning(f'--category_groups {path!r} not found; the feature '
+                           f'dir will get no category_groups.json')
+            metadata.pop('category_groups', None)
+            return None
         metadata['category_groups'] = groups
     return metadata.get('category_groups')
 
@@ -349,7 +406,41 @@ def _cache_params(task):
     # export dirs are symlinks) does not invalidate every entry.
     params['clips_digest'] = _digest(
         sorted(os.path.basename(p) for p in task['object_npzs']))
+    # Only objects with a head trim carry the key, so adding clip_trims.txt
+    # re-processes exactly those object types and leaves every other cached
+    # result valid.
+    if task.get('head_trims'):
+        params['head_trims_digest'] = _digest(task['head_trims'])
+    # Same for activity_keep.txt: only objects owning a listed clip carry it.
+    if task.get('activity_keep'):
+        params['activity_keep_digest'] = _digest(sorted(task['activity_keep']))
+    # Root offsets are baked into the export NPZs in place (same names), so
+    # neither clips_digest nor any list above sees them; the quats recorded in
+    # the NPZs are the only trace. Adding, changing or removing one therefore
+    # re-processes exactly the owning object type.
+    if task.get('root_offsets'):
+        params['root_offsets_digest'] = _digest(task['root_offsets'])
     return params
+
+
+# Written into an export NPZ by tools/patch_annotations.py (apply_root_offsets)
+# when it bakes a root orientation fix in; keep the name in sync.
+ROOT_OFFSET_KEY = 'root_offset_applied'
+
+
+def read_root_offsets(object_npzs):
+    """``{clip stem: [w, x, y, z]}`` for the export NPZs carrying a baked-in
+    root offset. Only the zip directory is read for the others, so this stays
+    cheap over a whole dataset."""
+    offsets = {}
+    for path in object_npzs:
+        with zipfile.ZipFile(path) as zf:
+            if ROOT_OFFSET_KEY + '.npy' not in zf.namelist():
+                continue
+        with np.load(path) as d:
+            offsets[os.path.basename(path)[:-4]] = [
+                round(float(x), 6) for x in d[ROOT_OFFSET_KEY]]
+    return offsets
 
 
 def _params_hash(params):
@@ -436,6 +527,7 @@ def process_object_task(task):
     clip_prefix = task.pop('clip_prefix')
     params = _cache_params(task)
     params_hash = _params_hash(params)
+    task.pop('root_offsets', None)   # cache key only; process_object reads the NPZs
 
     cached = _load_cached_result(part_path, object_type, params, params_hash)
     if cached is not None:
@@ -482,8 +574,32 @@ def build_object_tasks(args, clip_stride, motion_dir, metadata):
 
     object_types, all_motions = discover_object_types(motion_dir, args.dataset_type, args)
 
+    trims_path = resolve_clip_trims_path(args.clip_trims, args.data_dir)
+    clip_trims = load_clip_trims(trims_path)
+    if clip_trims:
+        stems = {m[:-4] for m in all_motions}
+        missing = sorted(set(clip_trims) - stems)
+        logger.info(f'Loaded {len(clip_trims)} head trims from {trims_path}'
+                    + (f'; {len(missing)} name no motion being processed '
+                       f'(filtered or absent): {missing[:5]}' if missing else ''))
+
+    keep_path = resolve_activity_keep_path(args.activity_keep, args.data_dir)
+    activity_keep = load_filtered_objects(keep_path)
+    if activity_keep:
+        stems = {m[:-4] for m in all_motions}
+        missing = sorted(activity_keep - stems)
+        logger.info(f'Loaded {len(activity_keep)} low-activity exemptions from {keep_path}'
+                    + (f'; {len(missing)} name no motion being processed '
+                       f'(filtered or absent): {missing[:5]}' if missing else ''))
+
     tasks = []
     for object_type in object_types:
+        object_npzs = collect_object_npzs(object_type, args.dataset_type,
+                                          motion_dir, all_motions)
+        head_trims = {s: clip_trims[s] for s in
+                      (os.path.basename(p)[:-4] for p in object_npzs) if s in clip_trims}
+        keep = sorted(s for s in (os.path.basename(p)[:-4] for p in object_npzs)
+                      if s in activity_keep)
         face_joints = get_object_face_joints(object_type, face_joint_names)
         if not face_joints:
             if args.dataset_type == 'mixamo':
@@ -494,8 +610,10 @@ def build_object_tasks(args, clip_stride, motion_dir, metadata):
         tasks.append(dict(
             object_type=object_type,
             part_path=_object_part_path(args.save_dir, object_type),
-            object_npzs=collect_object_npzs(object_type, args.dataset_type,
-                                            motion_dir, all_motions),
+            object_npzs=object_npzs,
+            head_trims=head_trims,
+            activity_keep=keep,
+            root_offsets=read_root_offsets(object_npzs),
             # Mixamo clip files carry no "{object_type}-" prefix; its single
             # object type owns the whole directory.
             clip_prefix=('' if args.dataset_type == 'mixamo'

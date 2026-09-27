@@ -15,6 +15,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if _REPO_ROOT not in sys.path:
@@ -583,8 +584,20 @@ def main():
     for animal, joints in data.items():
         clean_data[animal] = [post_process(clean_joint_name(j, animal)) for j in joints]
 
-    with open(output_path, "w") as f:
-        json.dump(clean_data, f, indent=2)
+    # Atomic write (temp file + os.replace), like every other annotation
+    # writer: a crash mid-dump must not leave a truncated
+    # clean_joint_names.json that the LLM pass would then "resume" from.
+    fd, tmp = tempfile.mkstemp(prefix=os.path.basename(output_path) + ".",
+                               suffix=".tmp",
+                               dir=os.path.dirname(output_path) or ".")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(clean_data, f, indent=2)
+        os.replace(tmp, output_path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
 
     print("Written {} entries to {}".format(len(clean_data), output_path))
 

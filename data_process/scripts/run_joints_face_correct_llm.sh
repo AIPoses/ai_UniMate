@@ -26,7 +26,10 @@ RAW=${RAW:-$(export_dir "$DATASET")/joint_names.json}
 CLEANED=${CLEANED:-$(export_dir "$DATASET")/clean_joint_names.json}
 FACE=${FACE:-$(export_dir "$DATASET")/face_joint_names.json}
 MODEL=${MODEL:-deepseek-v4-flash}
-MAX_TOKENS=${MAX_TOKENS:-512}
+# Matches the script's own default: this pass forces reasoning_effort=medium,
+# and on gpt-5* models the reasoning tokens share this budget (512 hit
+# finish_reason='length').
+MAX_TOKENS=${MAX_TOKENS:-2048}
 # Thinking backends need a much larger per-rig budget (see names_correct wrapper).
 if [[ "$MODEL" == deepseek* ]]; then RIG_TIMEOUT=${RIG_TIMEOUT:-300}; else RIG_TIMEOUT=${RIG_TIMEOUT:-15}; fi
 

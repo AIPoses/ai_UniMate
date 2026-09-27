@@ -100,10 +100,18 @@ def index_motion_npzs(motions_dir):
     across un-prefixed clips, so its ``mixamo`` key maps to the first NPZ.
     """
     index = {}
-    for p in sorted(Path(motions_dir).glob('*.npz')):
+    npzs = sorted(Path(motions_dir).glob('*.npz'))
+    for p in npzs:
         key = p.stem.split('-', 1)[0] if '-' in p.stem else p.stem
         index.setdefault(key, p)
-        index.setdefault('mixamo', p)
+    # Mixamo clips carry no object prefix, so the per-prefix keys above are
+    # action names; the rig itself is addressed as 'mixamo'. Only add that
+    # alias when un-prefixed clips exist, otherwise every prefixed export dir
+    # (truebones, objaverse) would gain a spurious 'mixamo' rig pointing at
+    # its first clip.
+    unprefixed = [p for p in npzs if '-' not in p.stem]
+    if unprefixed:
+        index.setdefault('mixamo', unprefixed[0])
     return index
 
 

@@ -236,7 +236,9 @@ Each export directory receives:
 | `joint_count.json`, `clip_frames.json`, `summary.json` | joints per skeleton, frames per clip, dataset-level summary |
 | `.completed/{asset}.json` | per-asset completion markers; delete one to force a re-export |
 
-`--multi-worker N` shards a *directory* input over N Blender processes (objaverse, mixamo, auto mode). Each worker writes its own `*_worker{i}.json` summary shards, merged afterwards by `tools/merge_summaries.py`. Truebones is exported by a single-process exporter and ignores `--multi-worker`.
+`--multi-worker N` shards a *directory* input over N Blender processes (objaverse, mixamo, auto mode). Each worker writes its own `*_worker{i}.json` summary shards, merged afterwards by `tools/merge_summaries.py` — only when every worker exited cleanly; a worker that had failed assets exits non-zero and the merge is left for the next run. Truebones is exported by a single-process exporter and ignores `--multi-worker`.
+
+An optional `excluded.csv` (column `object_id` or `file`) in the input directory or its parent lists asset stems the objaverse exporter skips entirely (`run_export_general.sh` does not read it).
 
 Skeleton pruning is joint across all of an asset's clips, so an asset only completes atomically — the marker is written once every clip of that asset is on disk. Markers also carry the pruned joint names, which is what makes `joint_names.json` rebuildable from disk after an interrupted run.
 
@@ -261,7 +263,7 @@ Each clip becomes `<clip>/v00{0..3}/*.png` (the per-frame PNGs the caption stage
 
 - **Frame cap.** Rendering stops at the first 200 frames per clip (`MAX_RENDER_FRAMES`, ~6.7 s at 30 fps) — enough context for captioning without paying for full-length renders. Clips shorter than `MIN_ACTION_FRAMES` (default 5) are skipped.
 - **`--fps` must match stage 1.** glTF stores keyframe times in seconds, so the importer resamples them at the scene frame rate; a mismatch makes the renders cover a different time window than the NPZs. Default 30 in both stages.
-- **Multi-GPU.** `--multi-worker N` shards assets over N processes. `CUDA_VISIBLE_DEVICES` pinning does **not** bind EEVEE's EGL context, so on a shared multi-GPU machine every worker still renders on the first GPU — give each render job a cgroup / scheduler allocation that exposes exactly one GPU instead.
+- **Multi-GPU.** `--multi-worker N` shards assets over N processes, and `NUM_GPUS=k` assigns worker `i` to `CUDA_VISIBLE_DEVICES=i % k`. That pinning does **not** bind EEVEE's EGL context, so on a shared multi-GPU machine every worker still renders on the first GPU — give each render job a cgroup / scheduler allocation that exposes exactly one GPU instead. `--missing-only` exists for objaverse only; the wrapper rejects it for the other datasets, which resume per asset anyway.
 - Quality knobs (`RESOLUTION`, `SAMPLES`, `CAMERA_DIST`) are environment overrides on both wrappers; run either with `-h`.
 
 </details>
@@ -318,7 +320,7 @@ python data_process/vlm_caption/caption_rewrite_llm.py \
 
 ### Stage 3 — Joint annotation: name cleanup & facing direction
 
-Two tasks, each with a rule-based and an LLM variant: joint-name cleaning (`names_*`) maps raw bone names onto a canonical anatomical vocabulary, and facing-direction selection (`face_*`) picks the bilateral joint pair — or head/tail body axis, for serpentine rigs — that defines each rig's heading. The LLM variants default to `deepseek-v4-flash` (`MODEL=` switches to any `gpt-*` model or a local HF model id) and fall back to the rules on failure.
+Two tasks, each with a rule-based and an LLM variant: joint-name cleaning (`names_*`) maps raw bone names onto a canonical anatomical vocabulary, and facing-direction selection (`face_*`) picks the bilateral joint pair — or head/tail body axis, for serpentine rigs — that defines each rig's heading. The LLM variants default to `deepseek-v4-flash` (`MODEL=` switches to any `gpt-*` model or a local HF model id). The two required passes fall back to the rules when a rig fails or exceeds its per-rig budget (`RIG_TIMEOUT`); the two refinement passes below instead keep the entry they were asked to correct.
 
 **Required** — these two produce the artifacts stage 4 consumes:
 
@@ -382,10 +384,12 @@ Applies the corrections found in a manual audit of the stage-2/3 outputs, so the
 | Output | Scope |
 |--------|-------|
 | `export/<ds>/filtered_clips.txt` | individual clips, any dataset |
-| `export/objaverse/filtered_objects.txt` | whole rigs — only the `tpose_wrong` flag (rest pose lies flat / rotated / upside-down) |
+| `export/<ds>/activity_keep.txt` | `<clip>`: exempt from stage 4's low-activity filter — a real motion confined to a few joints (a head turn, a clap, a wave) that the joint-activity gate cannot tell from a held pose; every other filter still applies |
+| `export/<ds>/clip_trims.txt` | `<clip> <N>`: the clip's export NPZ starts N frames late — stage 4 drops `motions/<clip>.npz` frames `0..N-1` on load — for a bind-pose or foreign opening frame that snaps into the motion, so the clip is kept instead of filtered |
+| `export/objaverse/filtered_objects.txt` | whole rigs — only the `tpose_wrong` flag (rest pose lies flat / rotated / upside-down) and `not_in_legacy_raw` (raw GLB absent from the legacy raw set, held out of training) |
 | `export/objaverse/rig_flags.json` | informational: `empty_pair`, `bone_pair`, `body_axis_unnamed`, `facing_wrong`, `object_no_front` |
 
-Everything except `tpose_wrong` is informational — those rigs are kept and trained with the facing they have. Per-rig evidence (rest-pose metrics, mesh T-pose grids and corrected-skeleton panels, all checked by eye) lives under `export/objaverse/tpose_abnormal_vis/`.
+Every other flag is informational — those rigs are kept and trained with the facing they have. Per-rig evidence (rest-pose metrics, mesh T-pose grids and corrected-skeleton panels, all checked by eye) lives under `export/objaverse/tpose_abnormal_vis/`.
 
 Truebones uses `filtered_clips.txt` for the three clips whose rig disagrees with their object's reference skeleton; objaverse uses it for the motion-discontinuity review.
 
@@ -403,7 +407,7 @@ APPLY_CLIP=1 bash data_process/scripts/run_extract_features.sh truebones
 NUM_WORKERS=8 NO_VIS=1 bash data_process/scripts/run_extract_features.sh objaverse
 ```
 
-Every object type is canonicalized against its T-pose (facing → XZ-centering → diameter scaling → grounding), static pre/post-roll is trimmed, low-activity and motion-discontinuous clips are filtered, and the per-object topology condition is written to `cond.npy`. Output goes to `dataset/features/<dataset>/`: `motions/{object}-{motion}-{clip_idx}.npz`, `videos/`, `tpose/`, plus `cond.npy`, `captions.json`, `category_groups.json`, `filtered_clips.json`, and a `metadata.txt` report.
+Every object type is canonicalized against its T-pose (facing → XZ-centering → diameter scaling → grounding), static pre/post-roll is trimmed, low-activity and motion-discontinuous clips are filtered, and the per-object topology condition is written to `cond.npy`. Output goes to `dataset/features/<dataset>/`: `motions/{object}-{motion}-{clip_idx}.npz`, `videos/`, `tpose/`, plus `cond.npy` and a `metadata.txt` report, and — whenever they have content — `captions.json`, `category_groups.json` and `filtered_clips.json` (runtime-filtered clips and skipped object types; clips pre-filtered through `filtered_clips.txt` are dropped before processing and not listed).
 
 <details>
 <summary><b>Details —</b> filters and thresholds</summary>
@@ -423,7 +427,7 @@ Every object type is canonicalized against its T-pose (facing → XZ-centering �
 
 Clips dropped at runtime and skipped object types are recorded in `filtered_clips.json`; `metadata.txt` reports the dataset totals.
 
-Two hand-reviewed skip lists are read from the export directory before any processing, both **optional**: `filtered_clips.txt` (individual clips, every dataset) and `filtered_objects.txt` (whole rigs, objaverse only), both written by `tools/patch_annotations.py`. The matching flags take a path, `"auto"` (the default) or an empty string to disable. `--category_groups` follows the same convention for `category_groups.json`, which this stage only copies through.
+Two hand-reviewed skip lists are read from the export directory before any processing, both **optional**: `filtered_clips.txt` (individual clips, every dataset) and `filtered_objects.txt` (whole rigs, objaverse only), both written by `tools/patch_annotations.py`, plus `clip_trims.txt` (`<clip> <N>`: drop the first N frames of a clip's export NPZ; `--clip_trims`) and `activity_keep.txt` (clips exempt from the low-activity filter; `--activity_keep`). The matching flags take a path, `"auto"` (the default) or an empty string to disable. `--category_groups` follows the same convention for `category_groups.json`, which this stage only copies through.
 
 </details>
 
@@ -443,14 +447,16 @@ Used at inference time to render generated motions onto their rigged meshes:
 
 ```bash
 ANIM_PATH=clip.npz bash data_process/scripts/run_animate_motion.sh objaverse   # stage-4 / generated clip + cond.npy
-ANIM_PATH=clip.npz bash data_process/scripts/run_animate_npz.sh                # stage-1 export NPZ → rig
+CHAR_PATH=char.glb ANIM_PATH=clip.npz bash data_process/scripts/run_animate_npz.sh   # stage-1 export NPZ → rig
 bash data_process/scripts/run_animate_fbx.sh                                   # raw animation FBXs → any character
 bash data_process/scripts/run_animate_mixamo.sh                                # batch over Mixamo export NPZs (Y Bot)
+CHAR_PATH=asset.glb OUTPUT_DIR=outputs/asset bash data_process/scripts/run_preprocess_char.sh   # one asset → cond.npy + canonical rig
+CHAR_PATH=outputs/asset/asset_canonical.glb ANIM_PATH=motion.npz bash data_process/scripts/run_animate_lbs.sh   # NumPy FK + LBS, no cond needed
 ```
 
-`run_animate_motion.sh` accepts both the stage-4 feature NPZ and the `.npy` motion features written by the model's sampler. The character is auto-resolved for truebones / objaverse from the raw asset directories; mixamo needs `CHAR_PATH` (default `character_refined/Y_Bot.fbx`, the rig the animation FBXs are authored on).
+`run_animate_motion.sh` accepts both the stage-4 feature NPZ and the `.npy` motion features written by the model's sampler. The character is auto-resolved for truebones / objaverse from the raw asset directories; mixamo defaults to `CHAR_PATH=dataset/raw/mixamo/character_refined/Y_Bot.fbx` (the rig the animation FBXs are authored on) when that file has been downloaded, and requires `CHAR_PATH` otherwise. The last two wrappers are described under [Custom Assets](#custom-assets).
 
-Armature bones absent from the motion are handled by `--extra_bones_strategy`: `merge` (default) transfers their vertex weights to the nearest kept ancestor and removes them, `remove` deletes the bones and their vertices, `keep` leaves them un-keyed.
+Armature bones absent from the motion are handled by `--extra_bones_strategy` on `animate_motion.py` / `animate_npz.py` (`EXTRA_BONES_STRATEGY=` on their wrappers and on `scripts/run_animate_motion.sh`): `merge` (default) transfers their vertex weights to the nearest kept ancestor and removes them, `remove` deletes the bones and their vertices, `keep` leaves them un-keyed. The FBX / raw-clip paths (`animate_fbx`, `animate_mixamo`, `animate_lbs`) leave undriven bones at rest.
 
 `run_animate_fbx.sh` needs no export stage at all: it bakes a raw animation clip — or a whole directory of them — onto any character that shares the clips' bone names (the Mixamo convention):
 
@@ -500,7 +506,7 @@ CHAR_PATH=outputs/asset/<name>_canonical.glb ANIM_PATH=<motion.npz-or-directory>
     bash data_process/scripts/run_animate_lbs.sh    # one animated GLB per action
 ```
 
-`animate_lbs` computes FK and Linear Blend Skinning manually in NumPy (Blender only parses the asset; the math is numerically identical to Blender's armature modifier); `SAVE=npz,obj` additionally dumps raw deformed vertex sequences / per-frame OBJs.
+`animate_lbs` computes FK and Linear Blend Skinning manually in NumPy (Blender only parses the asset; the math is numerically identical to Blender's armature modifier). `SAVE` is the full list of outputs: `SAVE=glb,npz,obj` writes the rigged GLB plus raw deformed vertex sequences and per-frame OBJs (`SAVE=npz,obj` alone drops the GLB). A feature NPZ that is not from a canonical asset can still be driven by passing `DATASET_TYPE=` and/or `COND_PATH=` (a single-entry `cond.npy` is accepted whatever the clip is named).
 
 ## Data Formats
 
@@ -541,19 +547,19 @@ The motion representation stores per-frame deltas without dividing by the frame 
 | Key | Shape | Description |
 |-----|-------|-------------|
 | `object_type` | str | object-type name (clip-name prefix) |
-| `parents` | `(J,)` | parent indices in canonical BFS joint order |
-| `offsets`, `tpos_offsets` | `(J, 3)` | bind-pose and canonical T-pose bone offsets |
-| `joint_names`, `clean_joint_names` | `(J,)` | raw and cleaned bone names (stage 3) |
-| `tpos_first_frame` | `(J, 3)` | canonical T-pose global joint positions |
-| `tpos_local_rotations`, `tpos_global_rotations` | `(J, 4)` | T-pose local / global rotations (quaternions) |
-| `joint_relations`, `joint_graph_dists` | `(J, J)` | pairwise edge-relation types and clamped topology distances |
-| `joint_depths` | `(J,)` | depth in the kinematic tree |
-| `edge_indexs` | `(2, 2(J−1))` | undirected edge list |
-| `spectral_feats` | `(J, K)` | Laplacian eigenvectors (`K = --max_freqs`) |
+| `parents` | list, len `J` | parent indices in canonical BFS joint order (`-1` = root) |
+| `offsets`, `tpos_offsets` | `(J, 3)` float64 | local bone offsets of the canonicalized T-pose (scaled, root moved by centering / grounding) and offsets recomputed from `tpos_first_frame` |
+| `joint_names`, `clean_joint_names` | list, len `J` | raw and cleaned bone names (stage 3) |
+| `tpos_first_frame` | `(J, 3)` float64 | canonical T-pose global joint positions |
+| `tpos_local_rotations`, `tpos_global_rotations` | `(J, 4)` float64 | T-pose local / global rotations (quaternions, `w, x, y, z`) |
+| `joint_relations`, `joint_graph_dists` | `(J, J)` int16 | pairwise edge-relation types and topology distances clamped at `--max_path_len` |
+| `joint_depths` | `(J,)` int64 | depth in the kinematic tree |
+| `edge_indexs` | `(2, 2(J−1))` int64 | undirected edge list |
+| `spectral_feats` | `(J, K)` float32 | Laplacian eigenvectors (`K = --max_freqs`) |
 | `kinematic_chains` | list | root-to-leaf joint chains |
 | `scale_factor`, `ground_height`, `ground_height_mode` | scalar | calibration applied to every clip of the type |
-| `face_joint_idxs` | dict | `{r_hip, l_hip, body_axis}` indices of the facing pair (when annotated) |
-| `captions` | dict | `{clip_stem: caption}` for the type's clips (also flattened into `captions.json`) |
+| `face_joint_idxs` | dict | `{r_hip, l_hip, body_axis}` indices of the facing pair; `-1, -1` when the rig has no resolved pair (identity facing) |
+| `captions` | dict | `{clip_stem: caption}` for the type's saved clips (also flattened into `captions.json`) |
 
 </details>
 
@@ -576,13 +582,15 @@ The export directory is where every stage before feature extraction accumulates 
 | `face_joint_names.json` | 3 | facing pair (or body axis) per rig |
 | `failed_clean_names.txt`, `failed_face_joints.txt` | 3 | rigs that fell back to the rules |
 | `filtered_clips.txt` | QA patch | clips stage 4 skips |
+| `clip_trims.txt` | QA patch | clips whose first N frames stage 4 drops |
+| `activity_keep.txt` | QA patch | clips stage 4's low-activity filter keeps |
 | `filtered_objects.txt`, `rig_flags.json` | QA patch | objaverse only: rigs stage 4 skips, and the full flag list |
 
 </details>
 
 ## Tools
 
-Standalone utilities in `data_process/tools/`. The QA visualizers have wrappers (listed under [Stage 3](#stage-3--joint-annotation-name-cleanup--facing-direction)); the rest are run directly.
+Standalone utilities in `data_process/tools/`. `vis_tpose.py` and `vis_tpose_facing.py` have wrappers (listed under [Stage 3](#stage-3--joint-annotation-name-cleanup--facing-direction)); the rest are run directly.
 
 | Tool | Purpose |
 |------|---------|

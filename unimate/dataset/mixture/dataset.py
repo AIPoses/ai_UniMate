@@ -1363,50 +1363,80 @@ class MotionDataset(data.Dataset):
 # ---------------------------------------------------------------------------
 
 class MixtureSampler(data.Sampler):
-    """Power-law balanced sampling across skeleton types.
+    """Power-law balanced sampling across datasets and skeleton types.
 
-    Per object type k with n_k motions, total sampling probability ∝ n_k^(1-alpha).
-    Per sample within type k, weight ∝ n_k^(-alpha).
+    Two levels. Dataset d with N_d motions gets total probability
+    ∝ N_d^(1-dataset_alpha); inside it, object type k with n_k motions gets a
+    share ∝ n_k^(1-alpha), split evenly over its motions.
 
-      alpha=0.0 : uniform per sample (data-rich types dominate)
+      alpha=0.0 : uniform per sample within the dataset (data-rich types dominate)
       alpha=0.5 : square-root balanced (default — good compromise)
       alpha=1.0 : uniform per type (ignores motion count entirely)
+      dataset_alpha=0.0 : each dataset keeps its natural share of the clips
+      dataset_alpha=1.0 : equal probability per dataset
+      dataset_alpha=None: single level (default, the behaviour before 2026-09-27) —
+          object types pooled across all datasets. A dataset of one rig (Mixamo)
+          then counts as one type and falls below 1% of a UniML3D mixture; the
+          *_v2 configs set 0.25.
+
+    With one dataset both levels coincide with the legacy behaviour.
 
     This is a plain Sampler (not DistributedSampler) that yields all indices.
     Accelerate's BatchSamplerShard handles per-rank sharding automatically.
     """
 
-    def __init__(self, data_source, alpha: float = 0.5):
+    def __init__(self, data_source, alpha: float = 0.5, dataset_alpha=None):
         super().__init__(data_source)
 
         name_list = data_source.motion_dataset.train_name_list
         motion_dict = data_source.motion_dataset.train_motion_dict
         total_samples = len(name_list)
 
+        # Keyed by (dataset_type, object_type): nothing stops two datasets from
+        # using the same object-type name.
         indices_by_object = defaultdict(list)
         for i, name in enumerate(name_list):
-            indices_by_object[motion_dict[name]['object_type']].append(i)
+            m = motion_dict[name]
+            indices_by_object[(m['dataset_type'], m['object_type'])].append(i)
+        objects_by_dataset = defaultdict(list)
+        for key in indices_by_object:
+            objects_by_dataset[key[0]].append(key)
 
-        # w_i = n_k^(-alpha) for sample i in type k, giving type k total
-        # probability ∝ n_k * n_k^(-alpha) = n_k^(1-alpha).
         weights = np.zeros(total_samples)
-        for indices in indices_by_object.values():
-            n_k = len(indices)
-            weights[indices] = n_k ** (-alpha)
+        if dataset_alpha is None:
+            # w_i = n_k^(-alpha) for sample i in type k, giving type k total
+            # probability ∝ n_k * n_k^(-alpha) = n_k^(1-alpha).
+            for indices in indices_by_object.values():
+                weights[indices] = len(indices) ** (-alpha)
+        else:
+            for d_type, keys in objects_by_dataset.items():
+                n_d = sum(len(indices_by_object[k]) for k in keys)
+                d_share = n_d ** (1 - dataset_alpha)
+                type_mass = {k: len(indices_by_object[k]) ** (1 - alpha) for k in keys}
+                z = sum(type_mass.values())
+                for k in keys:
+                    indices = indices_by_object[k]
+                    weights[indices] = d_share * type_mass[k] / z / len(indices)
 
         weights /= weights.sum()
+        dataset_probs = {d: sum(weights[indices_by_object[k]].sum() for k in keys)
+                         for d, keys in objects_by_dataset.items()}
+        logger.info(f'MixtureSampler (alpha={alpha}, dataset_alpha={dataset_alpha}): '
+                    + ', '.join(f'{d} n={sum(len(indices_by_object[k]) for k in keys)} '
+                                f'p={dataset_probs[d]:.3f}'
+                                for d, keys in objects_by_dataset.items()))
         type_probs = {
             object_type: weights[indices].sum()
             for object_type, indices in indices_by_object.items()
         }
         sorted_types = sorted(type_probs.items(), key=lambda x: x[1], reverse=True)
-        logger.info(f'MixtureSampler (alpha={alpha}): {len(sorted_types)} object types')
+        logger.info(f'MixtureSampler: {len(sorted_types)} object types')
         for name, prob in sorted_types[:5]:
-            logger.info(f'  top: {name} — n={len(indices_by_object[name])}, p={prob:.4f}')
+            logger.info(f'  top: {name[1]} ({name[0]}) — n={len(indices_by_object[name])}, p={prob:.4f}')
         if len(sorted_types) > 10:
             logger.info('  ...')
         for name, prob in sorted_types[-5:]:
-            logger.info(f'  bot: {name} — n={len(indices_by_object[name])}, p={prob:.4f}')
+            logger.info(f'  bot: {name[1]} ({name[0]}) — n={len(indices_by_object[name])}, p={prob:.4f}')
 
         self.weights = torch.as_tensor(weights, dtype=torch.double)
         self.total_samples = total_samples

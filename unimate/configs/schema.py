@@ -92,6 +92,12 @@ class DatasetConfig:
 
     # Sampling
     sampler_alpha: float = 0.5  # Power-law exponent: 0=uniform-per-sample, 0.5=sqrt-balanced, 1=uniform-per-type
+    # Two-level sampling: dataset d gets total probability ∝ N_d^(1-sampler_dataset_alpha)
+    # (N_d = its clips; 0 = its natural clip share, 1 = equal per dataset), then sampler_alpha
+    # balances object types inside it. None = legacy single level, object types pooled across
+    # datasets (lets one-rig Mixamo fall to <1% of a UniML3D mixture). Default None keeps
+    # configs and runs written before 2026-09-27 bit-identical; the *_v2 configs set 0.25.
+    sampler_dataset_alpha: Optional[float] = None
 
     # Train/eval split (clip-level, stratified per object_type).
     # test_split_ratio=0 disables splitting (all clips → train).
@@ -296,15 +302,24 @@ class TrainingConfig:
 
 @dataclass
 class SamplingArgs:
-    """Sampling arguments."""
+    """Sampling block: read by the periodic debug visualization during
+    training (``num_samples``, ``cfg_scale``) and as fallbacks by
+    ``unimate.inference.sample`` (``model_path``, ``cfg_scale``, ``device``).
+
+    ``output_dir``, ``seed``, ``object_type`` and ``num_repetitions`` are no
+    longer consumed by any entry point — inference has its own ``--output_dir``
+    / ``--seed`` / ``--num_repetitions`` flags and test-case files. They stay
+    here only so every saved ``outputs/*/config.json`` (written with
+    ``dataclasses.asdict``) keeps loading; do not add new users.
+    """
     model_path: Optional[str] = None
-    output_dir: Optional[str] = None
-    seed: Optional[int] = 10
+    output_dir: Optional[str] = None  # deprecated, unused
+    seed: Optional[int] = 10  # deprecated, unused (inference: --seed)
 
     # Sampling hyperparameters
-    object_type: Optional[List[str]] = None
-    num_samples: int = 4
-    num_repetitions: int = 3
+    object_type: Optional[List[str]] = None  # deprecated, unused
+    num_samples: int = 4  # debug visualization: object types per dataset per split
+    num_repetitions: int = 3  # deprecated, unused (inference: --num_repetitions)
     device: str = "cuda"
 
     # CFG

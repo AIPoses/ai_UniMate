@@ -12,8 +12,10 @@
 #                Detected as the last arg when it does not end in .npy / .npz.
 #
 # Env overrides:
-#   ANIM_MODE (default: fk), CHAR_PATH (default: auto),
-#   COND_PATH (default: dataset/features/<DATASET_TYPE>/cond.npy)
+#   ANIM_MODE (default: fk), CHAR_PATH (default: auto; mixamo falls back to
+#   dataset/raw/mixamo/character_refined/Y_Bot.fbx),
+#   COND_PATH (default: dataset/features/<DATASET_TYPE>/cond.npy),
+#   EXTRA_BONES_STRATEGY (merge|remove|keep, default: merge)
 #
 # Output: $OUTPUT_DIR/<anim_stem>.{glb,fbx}
 
@@ -127,6 +129,9 @@ process_one_motion() {
         fi
         if [ -n "${CHAR_PATH:-}" ]; then
             export CHAR_PATH
+        fi
+        if [ -n "${EXTRA_BONES_STRATEGY:-}" ]; then
+            export EXTRA_BONES_STRATEGY
         fi
         bash "$STAGE1_WRAPPER" "$DATASET_TYPE"
     )

@@ -193,8 +193,13 @@ def _names_permutation(ref_names, ref_parents, names, parents):
 
 
 def _load_npz_anim(object_npz_path, raw_parents, raw_njoints,
-                   corps_idxs, bfs_order, fps, raw_names=None):
+                   corps_idxs, bfs_order, fps, raw_names=None, head_trim=0):
     """Load a motion NPZ, apply joint subset/reorder, and downsample.
+
+    ``head_trim`` drops the first N frames of the export NPZ itself (its own
+    frame rate, before downsampling and the static trim), so a
+    ``clip_trims.txt`` entry means the same frames to every reader of the
+    export, not only to this stage.
 
     Returns:
         Tuple of (motion_anim, motion_fps, None) on success, or
@@ -211,6 +216,14 @@ def _load_npz_anim(object_npz_path, raw_parents, raw_njoints,
     anim_local_rot = anim_data['anim_local_rot']
     anim_local_pos = anim_data['anim_local_pos']
     rest_local_pos = anim_data['rest_local_pos']
+    if head_trim:
+        if head_trim >= nframes:
+            reason = f'head trim of {head_trim} frames removes all {nframes}'
+            logger.warning(f'Skipping clip ({reason}): {object_npz_path}')
+            return None, None, reason
+        anim_local_rot = anim_local_rot[head_trim:]
+        anim_local_pos = anim_local_pos[head_trim:]
+        nframes -= head_trim
 
     # corps_idxs/bfs_order are positional indices into the T-pose clip's
     # joint order; a source file enumerating the same skeleton in a
@@ -293,7 +306,7 @@ def _load_tpos_npz(tpos_data, corps_idxs=None, corps_names=None):
 def load_and_canonicalize_motion(object_npz_path, raw_parents, raw_njoints,
                                  corps_idxs, bfs_order, fps, scale_factor,
                                  ground_height, face_joint_idxs,
-                                 body_axis=False, raw_names=None):
+                                 body_axis=False, raw_names=None, head_trim=0):
     """Load a motion NPZ and canonicalize facing / XZ / ground + scale.
 
     ``scale_factor`` and ``ground_height`` are reused from T-pose
@@ -309,7 +322,7 @@ def load_and_canonicalize_motion(object_npz_path, raw_parents, raw_njoints,
     """
     motion_anim, motion_fps, skip_reason = _load_npz_anim(
         object_npz_path, raw_parents, raw_njoints, corps_idxs, bfs_order, fps,
-        raw_names=raw_names)
+        raw_names=raw_names, head_trim=head_trim)
     if motion_anim is None:
         return None, skip_reason
 
@@ -514,12 +527,16 @@ def _discontinuity_above_threshold(global_positions, step_threshold, ratio_thres
     body lengths AND that step is at least *ratio_threshold* times the clip's
     median step — the signature of concatenated actions, not of fast motion,
     which raises the median too. Non-finite input counts as discontinuous.
+    ``step_threshold <= 0`` disables the filter (non-finite input is still
+    rejected); without this guard ``step_max >= 0`` always holds and the
+    ratio test alone would decide.
     """
     if not np.isfinite(global_positions).all():
         return True, {'step_med': 0.0, 'step_max': float('inf'),
                       'jump_ratio': float('inf'), 'jump_frames': len(global_positions)}
     metrics = _discontinuity_metrics(global_positions)
-    is_bad = (metrics['step_max'] >= step_threshold
+    is_bad = (step_threshold > 0
+              and metrics['step_max'] >= step_threshold
               and metrics['jump_ratio'] >= ratio_threshold)
     return is_bad, metrics
 
@@ -636,13 +653,17 @@ def _process_motion_file(object_npz_path, ctx):
     """
     base_name = str(Path(object_npz_path).stem)
     min_frames = ctx['min_frames']
+    head_trim = ctx.get('head_trims', {}).get(base_name, 0)
+    if head_trim:
+        logger.info(f'[{base_name}] dropping the first {head_trim} export frames (clip_trims.txt)')
 
     # --- Load + motion-level canonicalize ----------------------------------
     result, skip_reason = load_and_canonicalize_motion(
         object_npz_path, ctx['raw_parents'], ctx['raw_njoints'],
         ctx['corps_idxs'], ctx['bfs_order'], ctx['fps'], ctx['scale_factor'],
         ctx['ground_height'], ctx['face_joint_idxs'],
-        body_axis=ctx['body_axis'], raw_names=ctx.get('raw_names'))
+        body_axis=ctx['body_axis'], raw_names=ctx.get('raw_names'),
+        head_trim=head_trim)
     if result is None:
         return {'n_saved': 0, 'frames': 0, 'clip_captions': {},
                 'filtered': [{'name': base_name, 'reason': skip_reason}]}
@@ -653,8 +674,9 @@ def _process_motion_file(object_npz_path, ctx):
     motion_anim, _, _ = trim_static_ends(
         motion_anim, static_threshold=ctx['static_threshold'])
     if len(motion_anim) < min_frames:
-        reason = (f'too few frames after static trim: {len(motion_anim)} '
-                  f'< {min_frames} (orig {orig_nframes})')
+        reason = (f'too few frames after static trim'
+                  + (f' (after a {head_trim}-frame head trim)' if head_trim else '')
+                  + f': {len(motion_anim)} < {min_frames} (orig {orig_nframes})')
         return {'n_saved': 0, 'frames': 0, 'clip_captions': {},
                 'filtered': [{'name': base_name, 'reason': reason}]}
 
@@ -676,6 +698,10 @@ def _process_motion_file(object_npz_path, ctx):
         is_low, clip_metrics = _activity_below_threshold(
             clip_global_positions, ctx['activity_threshold'])
         clip_name = f'{base_name}-{clip_idx:03d}'
+        if is_low and base_name in ctx['activity_keep']:
+            logger.info(f'[{clip_name}] low activity ({_format_activity(clip_metrics)}) '
+                        f'kept: listed in activity_keep.txt')
+            is_low = False
         if is_low:
             filtered.append({
                 'name': clip_name,
@@ -726,7 +752,7 @@ def process_object(object_type, object_npzs, save_dir,
                    jump_step_threshold=0.2, jump_ratio_threshold=8.0,
                    min_joints=None, max_joints=None,
                    use_tpos_ground_height=False, save_vis=True,
-                   vis_ground=False):
+                   vis_ground=False, head_trims=None, activity_keep=None):
     """Process all motion clips for one object type.
 
     Emits per-clip NPZs holding raw canonicalized arrays — global
@@ -742,6 +768,16 @@ def process_object(object_type, object_npzs, save_dir,
     minimum Y so each motion's lowest joint sits on the ground (False,
     default). Whichever is used is recorded in the cond as ``ground_height``
     / ``ground_height_mode``.
+
+    ``head_trims`` maps a motion stem to N: the first N frames of that
+    motion's export NPZ are dropped on load, before downsampling and the
+    static trim (hand-reviewed bind-pose / foreign first frames, from
+    ``clip_trims.txt``).
+
+    ``activity_keep`` is a set of motion stems exempt from the low-activity
+    filter: hand-reviewed small but real motions (a head turn, a wave) that the
+    joint-activity gate cannot tell from a held pose (``activity_keep.txt``).
+    Every other filter still applies to them.
 
     Object types with no motion NPZs, a joint count outside
     ``[min_joints, max_joints]`` or a degenerate (zero-extent) skeleton are
@@ -848,6 +884,8 @@ def process_object(object_type, object_npzs, save_dir,
         'min_frames': min_frames,
         'jump_step_threshold': jump_step_threshold,
         'jump_ratio_threshold': jump_ratio_threshold,
+        'head_trims': head_trims or {},
+        'activity_keep': set(activity_keep or ()),
         # I/O
         'motions_save_dir': motions_save_dir,
         'animations_save_dir': animations_save_dir,

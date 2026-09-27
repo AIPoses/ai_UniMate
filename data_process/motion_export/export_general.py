@@ -257,23 +257,27 @@ def main():
                 if saved:
                     all_joint_names.update(saved)
             except Exception as e:  # noqa: BLE001 — keep the batch going
+                n_failed += 1
                 logger.exception(f"Failed to export {asset_path}")
                 with open(error_log, 'a') as log_file:
                     log_file.write(f"Failed to export {asset_path}: {e}\n")
 
         worker_suffix = f"_worker{args.worker_id}" if args.num_workers > 1 else ""
-        write_export_summary(args.output_dir, all_joint_names,
+        write_export_summary(args.output_dir, all_joint_names, fps=args.fps,
                              worker_suffix=worker_suffix)
-    else:
-        saved = export_asset(args.input, args.output_dir, save_name=args.name,
-                             **export_kwargs)
-        if saved:
-            write_export_summary(args.output_dir, saved)
 
+        # Summaries are written first so a partial batch still leaves the
+        # canonical JSONs consistent; the non-zero exit then tells the
+        # wrapper not to merge shards and Slurm afterok chains to stop.
         if n_failed:
             logger.error(f"{n_failed}/{len(asset_paths)} assets failed; "
                          f"see {error_log}")
             sys.exit(1)
+    else:
+        saved = export_asset(args.input, args.output_dir, save_name=args.name,
+                             **export_kwargs)
+        if saved:
+            write_export_summary(args.output_dir, saved, fps=args.fps)
 
 
 if __name__ == "__main__":

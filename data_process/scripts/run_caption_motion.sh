@@ -48,7 +48,7 @@ done
 MODEL=${MODEL:-Qwen/Qwen3.5-9B}
 if [[ "${MODEL,,}" == *qwen* ]]; then
     backend=local                       # backends.py: BACKEND_QWEN
-elif [[ "$MODEL" == gemini* ]]; then
+elif [[ "${MODEL,,}" == *gemini* ]]; then
     backend=gemini
 else
     backend=openai
@@ -80,7 +80,8 @@ MAX_RETRIES=${MAX_RETRIES:-4}
 EXTRA=()
 case "$backend" in
     local)
-        MAX_TOKENS=${MAX_TOKENS:-800} ;;
+        MAX_TOKENS=${MAX_TOKENS:-800}
+        EXTRA+=(--max_retries="$MAX_RETRIES") ;;
     gemini)
         # Reasoning/answer tokens share one budget -> generous default.
         # Default 2 workers — token/minute quotas are easy to exhaust with
@@ -131,7 +132,7 @@ if [[ "$MODE" == "multi-gpu" ]]; then
 
     pids=()
     for gpu_id in $(seq 0 $((num_gpus - 1))); do
-        python -m data_process.vlm_caption.caption_motion "${COMMON[@]}" \
+        python -m data_process.vlm_caption.caption_motion "${COMMON[@]}" "${EXTRA[@]}" \
             --num_gpus="$num_gpus" --gpu_id="$gpu_id" \
             "${PASSTHRU[@]}" > >(tee "$LOG_DIR/gpu${gpu_id}.log") 2>&1 &
         pids+=($!)

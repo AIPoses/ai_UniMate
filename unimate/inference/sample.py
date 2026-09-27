@@ -77,7 +77,9 @@ class InferenceArgs:
     # train or eval motion_dict) or the dataset's eval split.
     inbetween: bool = False
     # Comma-separated signed temporal indices to hold clean. Negatives count
-    # from the per-clip valid length. Default keeps first + last frame.
+    # from the end of the generation window (max_motion_length), so -1 is the
+    # last slot even when the GT clip is shorter (see build_keep_mask).
+    # Default keeps first + last slot.
     keep_frames: str = "0,-1"
     # Text-guided motion editing: clamp the listed joints to GT for all
     # frames and let the model denoise the rest under a new caption (e.g.,

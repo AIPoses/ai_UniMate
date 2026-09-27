@@ -1003,10 +1003,18 @@ def _wrap_title(text: str, fig_width_in: float, font_pt: float,
     """Hard-wrap a caption to the figure width (suptitle's own wrapping is
     unreliable and long captions ran off both edges).
 
+    Line breaks already in *text* are kept: each one is wrapped on its own, so a
+    caller that writes "<clip>\n<caption>" gets two blocks rather than one run-on
+    paragraph (``textwrap`` treats a whole string as one paragraph and would fold
+    the newline into a space).
+
     ``fill`` is the share of the figure width a full line may occupy.
     """
     chars = max(24, int(fig_width_in * 72.0 * fill / _mean_advance_pt(font_pt, family)))
-    return '\n'.join(textwrap.wrap(text, chars)) or text
+    out = []
+    for para in text.split('\n'):
+        out.extend(textwrap.wrap(para, chars) or [para])
+    return '\n'.join(out) or text
 
 
 def _draw_caption(fig, text: str, figsize, font_pt: float = CAPTION_FONT_SIZE,

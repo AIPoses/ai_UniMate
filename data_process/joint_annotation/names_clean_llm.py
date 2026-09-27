@@ -57,12 +57,15 @@ from data_process.joint_annotation.llm import (  # noqa: E402
     FatalLLMError,
     LLMClient,
     MAX_RETRIES,
+    RigTimeout,
     add_llm_args,
     append_id_list,
+    install_rig_alarm,
     load_json,
     read_id_list,
     save_json,
     strip_llm_noise,
+    uninstall_rig_alarm,
 )
 
 
@@ -290,46 +293,59 @@ def rule_based_clean(rig_id, raw_names):
 
 
 def clean_rig(rig_id, raw_names, client, system_prompt=SYSTEM_PROMPT,
-              max_tokens=2048, max_retries=MAX_RETRIES, fallback_on_error=True):
+              max_tokens=2048, max_retries=MAX_RETRIES, fallback_on_error=True,
+              timeout_seconds=0):
     # type: (...) -> Tuple[List[str], bool]
     """Clean one rig's joint list via the LLM. Returns ``(names, used_fallback)``.
 
     Structural errors (length mismatch, bad JSON, ...) are fed back to the
-    LLM on the next attempt so it can self-correct.
+    LLM on the next attempt so it can self-correct. ``timeout_seconds`` arms
+    a per-rig SIGALRM (0 disables) so a hung backend cannot stall the batch;
+    a timed-out rig falls back to the rules like an exhausted retry loop.
     """
     if not raw_names:
         return [], False
 
     last_err = None
     correction = None
-    for attempt in range(1, max_retries + 1):
-        try:
-            raw_text = client.generate(
-                system_prompt, build_user_prompt(rig_id, raw_names, correction=correction),
-                max_tokens)
-            return parse_response(raw_text, len(raw_names)), False
-        except FatalLLMError:
-            raise
-        except Exception as err:  # noqa: BLE001 — retry on any backend/parse error
-            last_err = err
-            if isinstance(err, ValueError):
-                correction = (
-                    "Your previous response failed validation ({}). Return a "
-                    "JSON array of EXACTLY {} strings — one cleaned label per "
-                    "input joint, in the same order. Do not add, merge, split, "
-                    "or skip any entries. Output only the JSON array, no prose "
-                    "or code fences."
-                ).format(err, len(raw_names))
-            logger.warning("[{}] attempt {}/{} failed: {}".format(
-                rig_id, attempt, max_retries, err))
-            if attempt < max_retries:
-                time.sleep(1.5)
+    timed_out = False
+    prev_handler = install_rig_alarm(timeout_seconds)
+    try:
+        for attempt in range(1, max_retries + 1):
+            try:
+                raw_text = client.generate(
+                    system_prompt, build_user_prompt(rig_id, raw_names, correction=correction),
+                    max_tokens)
+                return parse_response(raw_text, len(raw_names)), False
+            except (RigTimeout, FatalLLMError):
+                raise
+            except Exception as err:  # noqa: BLE001 — retry on any backend/parse error
+                last_err = err
+                if isinstance(err, ValueError):
+                    correction = (
+                        "Your previous response failed validation ({}). Return a "
+                        "JSON array of EXACTLY {} strings — one cleaned label per "
+                        "input joint, in the same order. Do not add, merge, split, "
+                        "or skip any entries. Output only the JSON array, no prose "
+                        "or code fences."
+                    ).format(err, len(raw_names))
+                logger.warning("[{}] attempt {}/{} failed: {}".format(
+                    rig_id, attempt, max_retries, err))
+                if attempt < max_retries:
+                    time.sleep(1.5)
+    except RigTimeout:
+        timed_out = True
+        last_err = "rig timeout after {}s".format(timeout_seconds)
+    finally:
+        uninstall_rig_alarm(prev_handler)
 
-    if not fallback_on_error:
+    if not fallback_on_error and not timed_out:
         raise RuntimeError("LLM cleaning failed for {}: {}".format(rig_id, last_err))
 
-    logger.error("[{}] all {} attempts failed ({}); falling back to rule-based "
-                 "cleaner".format(rig_id, max_retries, last_err))
+    logger.error("[{}] {} ({}); falling back to rule-based cleaner".format(
+        rig_id,
+        "timed out" if timed_out else "all {} attempts failed".format(max_retries),
+        last_err))
     return rule_based_clean(rig_id, raw_names), True
 
 
@@ -339,7 +355,8 @@ def clean_rig(rig_id, raw_names, client, system_prompt=SYSTEM_PROMPT,
 
 def clean_all(input_path, output_path, client, system_prompt=SYSTEM_PROMPT,
               max_tokens=2048, max_retries=MAX_RETRIES, fallback_on_error=True,
-              failed_path=None, overwrite=False, redo_failed=False):
+              failed_path=None, overwrite=False, redo_failed=False,
+              rig_timeout=0):
     # type: (...) -> Dict[str, List[str]]
     """Clean every rig in ``input_path`` and write to ``output_path``.
 
@@ -387,6 +404,7 @@ def clean_all(input_path, output_path, client, system_prompt=SYSTEM_PROMPT,
             rig_id, raw_names, client,
             system_prompt=system_prompt, max_tokens=max_tokens,
             max_retries=max_retries, fallback_on_error=fallback_on_error,
+            timeout_seconds=rig_timeout,
         )
         fallback_count += int(used_fallback)
         cleaned[rig_id] = names_out
@@ -439,6 +457,11 @@ def main():
                         help="Also re-process the rig ids listed in --failed_log "
                              "(they always have a full-length entry from the "
                              "rule-based fallback, so they are otherwise skipped).")
+    parser.add_argument("--rig_timeout", type=int, default=0,
+                        help="Per-rig wall-clock budget in seconds (SIGALRM); a "
+                             "rig that exceeds it falls back to the rule-based "
+                             "cleaner and is listed in --failed_log. 0 disables "
+                             "(default). Thinking backends need a generous value.")
     add_llm_args(parser, default_max_tokens=2048)
     args = parser.parse_args()
 
@@ -457,6 +480,7 @@ def main():
         failed_path=args.failed_log,
         overwrite=args.overwrite,
         redo_failed=args.redo_failed,
+        rig_timeout=args.rig_timeout,
     )
 
     with open(args.input, "r") as f:

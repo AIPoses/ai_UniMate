@@ -222,9 +222,22 @@ def resolve_char_path(anim_path, dataset_type):
 
 
 def load_cond_data(cond_path, anim_path, dataset_type):
+    """Pick the clip's cond entry out of ``cond_path``.
+
+    The key is the object type resolved from the filename (or ``'mixamo'``).
+    A cond file holding exactly one entry (``preprocess_char.py`` output, or
+    a custom single-asset export) is accepted whatever the clip is called,
+    since there is nothing to disambiguate.
+    """
     object_type = resolve_object_type(anim_path, dataset_type)
     cond_dict = np.load(cond_path, allow_pickle=True).item()
     if object_type not in cond_dict:
+        if len(cond_dict) == 1:
+            (only_key,) = cond_dict.keys()
+            logger.warning(
+                f"object_type '{object_type}' not in {cond_path}; using its single "
+                f"entry '{only_key}'")
+            return cond_dict[only_key]
         raise KeyError(
             f"object_type '{object_type}' (resolved from '{anim_path}' under "
             f"dataset_type='{dataset_type}') not found in cond file {cond_path}; "

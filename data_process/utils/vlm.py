@@ -481,6 +481,30 @@ def merge_shards(output_json, num_gpus=None):
     save_json(merged, output_json)
     logger.info("Merged {} shards -> {} total entries in {}".format(
         len(shard_paths), len(merged), output_json))
+
+    # Each shard also records the clips it could not caption in
+    # ``<shard stem>_failed.txt``. Fold them into the canonical
+    # ``<output stem>_failed.txt`` so the next (single-process or sharded)
+    # run retries them; drop clips that another shard or a later pass
+    # captioned in the meantime.
+    base = os.path.splitext(output_json)[0]
+    failed_out = base + "_failed.txt"
+    failed = set()
+    if os.path.exists(failed_out):
+        with open(failed_out) as f:
+            failed.update(line.strip() for line in f if line.strip())
+    n_before = len(failed)
+    for spath in shard_paths:
+        shard_failed = os.path.splitext(spath)[0] + "_failed.txt"
+        if os.path.exists(shard_failed):
+            with open(shard_failed) as f:
+                failed.update(line.strip() for line in f if line.strip())
+    failed = {name for name in failed if not is_completed(merged.get(name))}
+    if failed or n_before:
+        with open(failed_out, "w") as f:
+            f.write("\n".join(sorted(failed)) + ("\n" if failed else ""))
+        logger.info("Merged failure lists -> {} pending clips in {}".format(
+            len(failed), failed_out))
     return merged
 
 

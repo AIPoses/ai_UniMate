@@ -30,12 +30,13 @@
 
 ## 🔥 News
 
+- **[2026-09-27]** **Preview checkpoints** are released on [Hugging Face](https://huggingface.co/Linzhan/UniMate). 🚀
 - **[2026-09-06]** The **training and inference code** is released. 🚀
 - **[2026-08-30]** The raw **UniML3D dataset** and its [data-processing pipeline](data_process/) are released. 🚀
 - **[2026-08-01]** Our [Interactive Demo](https://linzhanmou.com/unimate/interactive.html) is live — browse our animation results in 3D. 🎮
 - **[2026-07-18]** UniMate is accepted to SIGGRAPH Asia 2026! 🎉
 
-> **[TODO]** Pretrained checkpoints, the exact training configuration and data manifest used to produce them, evaluation scripts, and demo prompts will be released soon.
+> **[Update]** Preview checkpoints are released at [Linzhan/UniMate](https://huggingface.co/Linzhan/UniMate); new checkpoints will be synced there as they are released.
 
 ## 🛠️ Environment Setup
 
@@ -87,7 +88,7 @@ Runs are configured by the JSON files in [`configs/`](configs/).
 
 The two axes are independent and all four combinations are implemented, so `full` x `adaln` and `graph` x `cross_attn` also run if you set them in a config; the two shipped pairings are the ones the paper compares.
 
-Not shared across configs: `training.batch_size`, `training.num_steps` and `dataset.max_joints` are tuned per data combination (GPU memory tracks batch x frames x joints). `dataset.max_joints` is `100` for `truebones_*` / `mixamo_*` and `60` for `objaverse_*` / `uniml3d_*`; `dataset.min_joints` is `5` everywhere. Together they bound the skeleton sizes a run admits (object types outside the range are dropped) and, through what survives, the joint-axis padding width. Every other setting is identical.
+Not shared across configs: `training.batch_size`, `training.num_steps`, `model.num_layers` and `dataset.max_joints` are tuned per data combination (GPU memory tracks batch x frames x joints; depth grows with the data: 6 layers for a single Truebones / Mixamo source, 8 for Objaverse, 10 for the full mixture). `dataset.max_joints` is `100` for `truebones_*` / `mixamo_*` and `60` for `objaverse_*` / `uniml3d_*`; `dataset.min_joints` is `5` everywhere. Together they bound the skeleton sizes a run admits (object types outside the range are dropped) and, through what survives, the joint-axis padding width. Mixamo is a single skeleton, so its configs also turn off the object-type balancing (a no-op with one type) and, by choice, the topology augmentations. Every other setting is identical.
 
 </details>
 
@@ -122,7 +123,7 @@ Each run writes to `outputs/<experiment name>/`:
 
 Clips are drawn by a power-law-balanced sampler when `training.balanced` is set — a type with `n` clips is sampled in proportion to `n^(1-sampler_alpha)`, so at the default `sampler_alpha = 0.5` a species with 100 clips is seen ten times as often as one with a single clip rather than a hundred times — then augmented on the fly — joint addition, leaf removal, chain pooling and per-bone length perturbation (`dataset.use_*_aug`) — so the model sees more topologies than the data literally contains. Every clip is padded to `max_joints` on the joint axis and `max_motion_length` on the time axis, with masks carried alongside; nothing padded ever contributes to attention or to the loss.
 
-Training is **flow matching** (`training.diff_model = "flow"`): the network predicts the velocity of a linear interpolant between noise and data, under a masked L2 loss plus an optional geodesic rotation term (`training.lambda_geo`). Conditioning is dropped with probability `model.cond_mask_prob` so the same weights serve the conditional and unconditional branches that classifier-free guidance interpolates at sampling time. AdamW with a cosine schedule and warmup, gradient clipping at `training.max_grad_norm`, and an EMA copy of the weights (`training.use_ema`) — the copy inference loads by default.
+Training is **flow matching** (`training.diff_model = "flow"`): the network predicts the velocity of a linear interpolant between noise and data, under a masked L2 loss plus two auxiliary terms computed on the reconstructed clean motion — a geodesic rotation loss (`training.lambda_geo`) and a velocity-smoothness loss (`training.lambda_smooth`). Conditioning is dropped with probability `model.cond_mask_prob` so the same weights serve the conditional and unconditional branches that classifier-free guidance interpolates at sampling time. AdamW with a cosine schedule and warmup, gradient clipping at `training.max_grad_norm`, and an EMA copy of the weights (`training.use_ema`) — the copy inference loads by default.
 
 </details>
 
@@ -156,7 +157,7 @@ Given a rigged 3D asset and a text prompt, UniMate generates articulated motion 
     <img src="assets/qualitative.png" alt="Qualitative results" width="100%">
 </div>
 
-Sampling starts from the output directory of a training run (`config.json`, `dataset_stats.npy`, `checkpoints/`) — pretrained checkpoints in the same layout are coming soon. The target skeleton — T-pose and topology conditioning — is taken from the dataset, so the `dataset/features/<dataset>/` directory the model was trained on must be present.
+Sampling starts from the output directory of a training run (`config.json`, `dataset_stats.npy`, `checkpoints/`) — the [released checkpoints](https://huggingface.co/Linzhan/UniMate) use the same layout. The target skeleton — T-pose and topology conditioning — is taken from the dataset, so the `dataset/features/<dataset>/` directory the model was trained on must be present.
 
 ```bash
 python -m unimate.inference.sample \
