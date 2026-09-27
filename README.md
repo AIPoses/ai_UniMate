@@ -6,8 +6,8 @@
   <a href="https://linzhanmou.com/unimate/"><img alt="Project Page" src="https://img.shields.io/badge/Project_Page-6D28D9?style=for-the-badge&logo=githubpages&logoColor=white"></a>
   <a href="https://arxiv.org/abs/2609.05415"><img alt="arXiv" src="https://img.shields.io/badge/arXiv-2609.05415-B31B1B?style=for-the-badge&logo=arxiv&logoColor=white"></a>
   <a href="https://linzhanmou.com/unimate/interactive.html"><img alt="Interactive Demo" src="https://img.shields.io/badge/Interactive_Demo-0EA5E9?style=for-the-badge&logo=threedotjs&logoColor=white"></a>
-  <a href="https://huggingface.co/collections/Linzhan/unimate"><img alt="Hugging Face Dataset" src="https://img.shields.io/badge/Dataset-FFD21E?style=for-the-badge&logo=huggingface&logoColor=000000"></a>
-  <a href="https://linzhanmou.com/unimate/resources/unimate-poster.png"><img alt="SIGGRAPH Asia Poster" src="https://img.shields.io/badge/SIGGRAPH_Asia-Poster-6D28D9?style=for-the-badge&labelColor=1E1B4B"></a>
+  <a href="https://huggingface.co/datasets/Linzhan/UniML3D"><img alt="Hugging Face Dataset" src="https://img.shields.io/badge/Dataset-FFD21E?style=for-the-badge&logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjIuNCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48ZWxsaXBzZSBjeD0iMTIiIGN5PSI1IiByeD0iOCIgcnk9IjMiLz48cGF0aCBkPSJNNCA1djE0YzAgMS42NiAzLjU4IDMgOCAzczgtMS4zNCA4LTNWNSIvPjxwYXRoIGQ9Ik00IDEyYzAgMS42NiAzLjU4IDMgOCAzczgtMS4zNCA4LTMiLz48L3N2Zz4%3D"></a>
+  <a href="https://huggingface.co/Linzhan/UniMate"><img alt="Hugging Face Checkpoints" src="https://img.shields.io/badge/Checkpoints-FF9D00?style=for-the-badge&logo=huggingface&logoColor=000000"></a>
 </p>
 
 <p align="center">
@@ -30,13 +30,12 @@
 
 ## 🔥 News
 
-- **[2026-09-27]** **Preview checkpoints** are released on [Hugging Face](https://huggingface.co/Linzhan/UniMate). 🚀
 - **[2026-09-06]** The **training and inference code** is released. 🚀
-- **[2026-08-30]** The raw **UniML3D dataset** and its [data-processing pipeline](data_process/) are released. 🚀
+- **[2026-08-30]** The [UniML3D dataset](https://huggingface.co/collections/Linzhan/unimate) and its [data-processing pipeline](data_process/) are released. 🚀
 - **[2026-08-01]** Our [Interactive Demo](https://linzhanmou.com/unimate/interactive.html) is live — browse our animation results in 3D. 🎮
 - **[2026-07-18]** UniMate is accepted to SIGGRAPH Asia 2026! 🎉
 
-> **[Update]** Preview checkpoints are released at [Linzhan/UniMate](https://huggingface.co/Linzhan/UniMate); new checkpoints will be synced there as they are released.
+> **[Update]** Preview checkpoints are released at [HuggingFace](https://huggingface.co/Linzhan/UniMate); new checkpoints will be synced there.
 
 ## 🛠️ Environment Setup
 
