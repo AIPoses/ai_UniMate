@@ -303,6 +303,12 @@ In-betweening and editing clamp against a real clip, so their test-case keys mus
 
 </details>
 
+## 📌 Note
+
+The processed **UniML3D** dataset is being prepared for open release. Its captions were **re-processed** for this release, so they do not necessarily match the prompts shown on the [project page](https://linzhanmou.com/unimate/) or in the paper. See the released caption style in [Truebones](https://huggingface.co/datasets/Linzhan/UniML3D/blob/main/export/truebones/motion_captions.json) · [Mixamo](https://huggingface.co/datasets/Linzhan/UniML3D/blob/main/export/mixamo/motion_captions.json) · [Objaverse](https://huggingface.co/datasets/Linzhan/UniML3D/blob/main/export/objaverse/motion_captions.json).
+
+UniMate is an **early step** toward text-to-animation for any skeleton, and many motions and skeletons **still fail**. We believe that scaling up training data — **distilled from agents or generated from videos** — is a promising direction to close this gap. If you run into failure cases, please **open an [issue](https://github.com/Friedrich-M/UniMate/issues) or [contact us](https://linzhanm.github.io/)**; they help us improve.
+
 ## 📝 Citation
 
 If you find UniMate useful in your research, please consider citing our work:
@@ -322,6 +328,6 @@ The code in this repository is released under the [MIT License](LICENSE).
 
 The datasets remain governed by the licenses of their original sources: the [Mixamo](https://www.mixamo.com/) assets by Adobe's Mixamo terms of use, the [Objaverse-XL](https://objaverse.allenai.org/) assets by the license attached to each original object, and the Truebones ZOO motions by [Truebones](https://truebones.com)' commercial license. Please review and comply with the respective source licenses before using the data.
 
-## 📌 Note
+## 🤝 Acknowledgement
 
-The processed **UniML3D** dataset is being prepared for open release. Its captions were **re-processed** for this release, so they do not necessarily match the prompts shown on the [project page](https://linzhanmou.com/unimate/) or in the paper.
+We thank the authors of [AnyTop](https://github.com/Anytop2025/Anytop) for open-sourcing their codebase, on which parts of this repository build.
