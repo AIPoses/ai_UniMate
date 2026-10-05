@@ -7,7 +7,7 @@ python -m data_process.rig_preprocess run --input robot.glb --output_dir outputs
 # read outputs/rig/robot/REVIEW.md, correct annotation.json (by hand or with an LLM / coding agent), then build:
 python -m data_process.rig_preprocess run --input robot.glb --output_dir outputs/rig/robot \
     --annotation outputs/rig/robot/annotation.json
-python -m unimate.inference.sample --exp_dir outputs/unimate_uniml3d_f60_v3_preview --asset outputs/rig/robot \
+python -m unimate.inference.sample --exp_dir outputs/unimate_uniml3d_f60_v3 --asset outputs/rig/robot \
     --prompt "An object walks forward." --num_repetitions 3 --output_dir outputs/samples/custom
 bash scripts/run_animate_motion.sh outputs/samples/custom   # robot.glb, animated per motion
 ```

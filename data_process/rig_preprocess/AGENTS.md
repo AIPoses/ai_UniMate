@@ -14,7 +14,7 @@ python -m data_process.rig_preprocess run --input <asset.glb|.gltf|.fbx> --outpu
 python -m data_process.rig_preprocess run --input <asset> --output_dir outputs/rig/<name> \
     --annotation outputs/rig/<name>/annotation.json
 # 4. check summary.json and preview.png, then sample and animate
-python -m unimate.inference.sample --exp_dir outputs/unimate_uniml3d_f60_v3_preview --asset outputs/rig/<name> \
+python -m unimate.inference.sample --exp_dir outputs/unimate_uniml3d_f60_v3 --asset outputs/rig/<name> \
     --prompt "An object walks forward." --num_repetitions 3 --output_dir outputs/samples/<name>
 bash scripts/run_animate_motion.sh outputs/samples/<name>
 ```

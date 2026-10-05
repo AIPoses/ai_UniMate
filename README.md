@@ -94,7 +94,7 @@ The two axes are independent and all four combinations are implemented, so `full
 
 Tuned per data combination: `training.batch_size` (16 / 32 / 24 / 16 for Truebones / Mixamo / Objaverse / UniML3D), `training.num_steps` (80k / 120k / 100k / 120k), `model.num_layers` (6 / 6 / 8 / 10) and `dataset.max_joints` (100 / 100 / 60 / 70; `dataset.min_joints` is `5` everywhere). The joint range bounds the skeleton sizes a run admits (object types outside it are dropped) and, through what survives, the joint-axis padding width. Mixamo is a single skeleton, so its configs also turn off the object-type balancing (a no-op with one type) and, by choice, the topology augmentations.
 
-The `uniml3d_*` configs train the recommended model's recipe: fixed per-dataset sampling weights (`dataset.sampler_dataset_weights`), one normalization pool across datasets (`dataset.use_dataset_stats: false`), the generic and detailed captions drawn with probability 0.35 and 0.25 besides the normal one, and logit-normal flow time (`training.t_sampling`). The single-source configs keep per-dataset statistics, the normal caption and uniform flow time.
+The `uniml3d_*` configs train the recommended model's recipe (at 120k steps; the released `unimate_uniml3d_f60_v3` trained 150k): fixed per-dataset sampling weights (`dataset.sampler_dataset_weights`), one normalization pool across datasets (`dataset.use_dataset_stats: false`), the generic and detailed captions drawn with probability 0.35 and 0.25 besides the normal one, and logit-normal flow time (`training.t_sampling`). The single-source configs keep per-dataset statistics, the normal caption and uniform flow time.
 
 </details>
 
@@ -174,8 +174,8 @@ Given a rigged 3D asset and a text prompt, UniMate generates articulated motion 
 
 ```bash
 hf download Linzhan/UniMate --repo-type model --local-dir outputs \
-    --include "unimate_uniml3d_f60_v3_preview/*.json" --include "unimate_uniml3d_f60_v3_preview/*.npy" \
-    --include "unimate_uniml3d_f60_v3_preview/checkpoints/checkpoint_step_100000.pt"
+    --include "unimate_uniml3d_f60_v3/*.json" --include "unimate_uniml3d_f60_v3/*.npy" \
+    --include "unimate_uniml3d_f60_v3/checkpoints/checkpoint_step_150000.pt"
 ```
 
 **2a. Animate a dataset skeleton.** Download [UniML3D](https://huggingface.co/datasets/Linzhan/UniML3D) into `dataset/` (≈ 88 GB; its [dataset card](https://huggingface.co/datasets/Linzhan/UniML3D#download) shows smaller partial downloads):
@@ -206,7 +206,7 @@ Then name skeletons as `<dataset>:<object_type>` (`truebones:Horse`, `mixamo`, `
 </details>
 
 ```bash
-python -m unimate.inference.sample --exp_dir outputs/unimate_uniml3d_f60_v3_preview \
+python -m unimate.inference.sample --exp_dir outputs/unimate_uniml3d_f60_v3 \
     --test_cases_json assets/examples/examples.json --num_repetitions 3 --output_dir outputs/samples/examples
 # drive each skeleton's canonical mesh: one animated GLB + FBX per motion
 # (Truebones meshes are not distributed; SKIP_INVALID=1 skips motions without a mesh)
@@ -218,11 +218,11 @@ SKIP_INVALID=1 bash scripts/run_animate_motion.sh outputs/samples/examples
 **2b. Animate your own rigged asset.** [`rig_preprocess`](data_process/rig_preprocess/README.md) turns a rigged GLB / glTF / FBX, animated or not, into an asset directory that `--asset` takes. It labels the joints with an LLM and stops so you can review the labels and the facing pair before building, since the model is conditioned on both; its [guide](data_process/rig_preprocess/README.md) walks through the review and every option. Three assets processed this way are in [`assets/examples`](assets/examples): a Unitree Go2 quadruped, an eagle and a shark:
 
 ```bash
-python -m unimate.inference.sample --exp_dir outputs/unimate_uniml3d_f60_v3_preview --asset assets/examples/unitree_go2 \
+python -m unimate.inference.sample --exp_dir outputs/unimate_uniml3d_f60_v3 --asset assets/examples/unitree_go2 \
     --prompt "An object trots forward." "An object rears up on its hind legs." --output_dir outputs/samples/custom
-python -m unimate.inference.sample --exp_dir outputs/unimate_uniml3d_f60_v3_preview --asset assets/examples/eagle \
+python -m unimate.inference.sample --exp_dir outputs/unimate_uniml3d_f60_v3 --asset assets/examples/eagle \
     --prompt "An object flaps its wings." "An object strikes forward." --output_dir outputs/samples/custom
-python -m unimate.inference.sample --exp_dir outputs/unimate_uniml3d_f60_v3_preview --asset assets/examples/shark \
+python -m unimate.inference.sample --exp_dir outputs/unimate_uniml3d_f60_v3 --asset assets/examples/shark \
     --prompt "An object swims and turns around." "An object bites forward." --output_dir outputs/samples/custom
 bash scripts/run_animate_motion.sh outputs/samples/custom   # each asset's mesh, animated
 ```
@@ -257,7 +257,7 @@ Hold chosen keyframes at their ground truth and generate the transitions between
 
 ```bash
 KEEP_FRAMES="0,-1" bash scripts/run_sample_motion_inbetween.sh \
-    outputs/unimate_uniml3d_f60_v3_preview cases.json
+    outputs/unimate_uniml3d_f60_v3 cases.json
 ```
 
 </details>
@@ -281,7 +281,7 @@ Hold chosen joints at their ground-truth motion for every frame and regenerate t
 
 ```bash
 KEEP_JOINTS="Neck,Head" bash scripts/run_sample_motion_edit.sh \
-    outputs/unimate_uniml3d_f60_v3_preview cases.json
+    outputs/unimate_uniml3d_f60_v3 cases.json
 ```
 
 </details>
@@ -305,7 +305,7 @@ Test-case values become *lists* of prompts, one per segment; `--expand_overlap` 
 
 ```bash
 EXPAND_OVERLAP=10 bash scripts/run_sample_motion_expand.sh \
-    outputs/unimate_uniml3d_f60_v3_preview cases.json
+    outputs/unimate_uniml3d_f60_v3 cases.json
 ```
 
 </details>
