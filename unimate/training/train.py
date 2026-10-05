@@ -157,9 +157,14 @@ def train_diffusion(args: TrainingArgs, config: MainConfig,
     # ---- Training tracker ----
     # Optimizer steps per epoch: this rank's batches over the accumulation
     # (accelerate also steps on an epoch's last, partial group).
+    # An epoch budget wins over num_steps, which the schema always fills in.
+    epoch_budget = bool(config.training.num_epochs)
+    if epoch_budget and config.training.num_steps and is_main:
+        logger.info(f"num_epochs={config.training.num_epochs} sets the budget; "
+                    f"num_steps={config.training.num_steps} is ignored.")
     tracker = TrainingTracker(
-        max_epochs=config.training.num_epochs,
-        max_steps=config.training.num_steps,
+        max_epochs=config.training.num_epochs if epoch_budget else None,
+        max_steps=None if epoch_budget else config.training.num_steps,
         steps_per_epoch=math.ceil(
             len(dataloader) / config.training.gradient_accumulation_steps),
     )

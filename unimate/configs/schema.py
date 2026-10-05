@@ -331,7 +331,7 @@ class TrainingConfig:
     min_lr_ratio: float = 0.01  # Min LR as a fraction of learning_rate
 
     # Duration
-    num_epochs: Optional[int] = None
+    num_epochs: Optional[int] = None  # when set, the budget (num_steps is then ignored)
     num_steps: Optional[int] = 100_000
     log_interval: int = 50
     save_interval: int = 10_000

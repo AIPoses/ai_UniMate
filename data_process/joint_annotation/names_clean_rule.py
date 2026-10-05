@@ -567,6 +567,10 @@ def _name_side(raw):
     return side or extract_inner_side(bare)[0]
 
 
+# Bookkeeping names that say nothing about the body part: a placeholder.
+_GENERIC_NAMES = frozenset({'extra', 'helper', 'dummy', 'null', 'joint', 'node', 'bone'})
+
+
 def clean_joint_name(raw, animal, refine=True):
     """Clean one joint name: the rules below, then (*refine*) the label
     refinements the reviewed annotations support:
@@ -584,6 +588,9 @@ def clean_joint_name(raw, animal, refine=True):
     if not refine or not raw or not raw.strip():
         return out
     cleaned = post_process(out)
+    side_m = re.match(r'^(Left|Right) ', cleaned)
+    if re.sub(r'^(Left|Right) ', '', cleaned).lower() in _GENERIC_NAMES:
+        out = cleaned = with_side(side_m.group(1) if side_m else None, 'Bone')
     if cleaned == 'Bone' or not is_canonical_label(cleaned):
         vocab = _learned_vocab()
         label = next((vocab[k] for k in name_keys(raw) if k in vocab), None)
